@@ -1,1 +1,3 @@
 # tswift_pop
+Is the popularity of a Taylor Swift song related to the release year, length (in seconds), danceability, acous- ticness, energy, loudness, valence, or tempo of the song?
+Taylor Swift is one of the most popular artists in the world, yet her music spans decades, genre, and tone. I want to empirically study the characteristics of her music to better understand what determines the popularity of her songs, or discover if it is even possible to figure out what makes her songs popular. In the future, I would want to apply this analysis to other artists to see if there are overarching trends in the popularity of music on Spotify.
