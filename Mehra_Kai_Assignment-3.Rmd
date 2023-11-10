@@ -1,0 +1,426 @@
+---
+title: "Mehra_Kai_Assignment-3"
+author: "Kai Mehra"
+date: "2023-02-17"
+output:
+  pdf_document: default
+  html_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Libraries
+```{r}
+# Load the {tidyverse}, {ggplot2}, {regclass}, {GGally}, and {bestNormalize}
+# libraries
+library(tidyverse)
+library(ggplot2)
+library(regclass)
+library(GGally)
+library(bestNormalize)
+```
+
+# Data
+```{r}
+# Load the swift_spotify_data dataset using read_csv
+swift_spotify_data <-
+  read_csv("../Data/spotify_taylorswift.csv")
+
+dim(swift_spotify_data)
+colnames(swift_spotify_data)
+```
+
+The `swift_spotify_data` data set is a data set from Kaggle user "JAN LLENZL DAGOHOY". The data set was taken from Spotify's API and contains song characteristic data of Taylor Swift's songs from the beginning of her career in 2006 to November 6th, 2021. There 168 songs in the data set and 12 characteristics were tracked for each song. 
+
+# Research Quetion
+Is the popularity of a Taylor Swift song related to the release year, length (in seconds), danceability, acousticness, energy, loudness, valence, or tempo of the song?
+
+Taylor Swift is one of the most popular artists in the world, yet her music spans decades, genre, and tone. I want to empirically study the characteristics of her music to better understand what determines the popularity of her songs, or discover if it is even possible to figure out what makes her songs popular. In the future, I would want to apply this analysis to other artists to see if there are overarching trends in the popularity of music on Spotify.
+
+## Hypotheses
+ * $H_0$ - The popularity of a Taylor Swift song is not related to the release year, length (in seconds), danceability, acousticness, energy, loudness, valence, or tempo of the song
+ * $H_1$ - The popularity of a Taylor Swift song is related to at least one of the release year, length (in seconds), danceability, acousticness, energy, loudness, valence, or tempo of the song
+
+# Variables of Interest
+
+## Dependent Variable:
+
+popularity: popularity is measured on a scale of 1-100, with 1 be very unpopular and 100 being very popular. This popularity measure is based upon Spotify's classified algorithm meaning the true understanding of the measure is not possible to fully comprehend.
+
+## Independent Variables:
+
+ * year: The year the song was released
+ * length_sec: The length of the song in seconds
+ * danceability: how suitable a track is for dancing based on a combination of musical elements.      0.0 is least danceable and 1.0 is most danceable.
+ * acousticness: 	a confidence measure from 0.0 to 1.0 of whether the track is acoustic. 1.0          represents high confidence the track is acoustic.
+ * energy: a measure from 0.0 to 1.0 and represents a perceptual measure of intensity and activity.
+ * loudness: The overall loudness of a track in decibels (dB). Values typical range between -60 and    0 db.
+ * valence: A measure from 0.0 (very sad) to 1.0 (very happy) describing the musical positiveness     conveyed by a track.
+ * tempo: The overall estimated tempo of a track in beats per minute (BPM).
+ 
+These variables provide a comprehensive understanding of the general characteristics of a specific song. Additionally, since they are all continuous, numeric variables, they lend themselves to analysis using linear regression. Intuitively, these variables should have some impact on popularity as songs fitting into certain genres have higher levels of popularity than others. These variables help define genres; for example, a highly danceable, energetic, valent, and loud song would likely be a club/party song which can be incredibly popular.
+
+# Data Wrangling
+```{r}
+# selcting the primary variables of interest
+song_chars <-
+  swift_spotify_data %>%
+  select(
+    name,
+    popularity,
+    release_date,
+    length,
+    danceability,
+    acousticness,
+    energy,
+    loudness,
+    valence,
+    tempo
+  )
+```
+
+```{r}
+# splitting the release_date variable into year, month, and day variabes
+song_chars <-
+  song_chars %>%
+   separate(release_date, into = c("year", "month", "day"),
+           sep = "-", convert = TRUE) %>%
+  mutate(length_sec = length/1000) %>% # converting length from milsecs to secs
+  select(-length)
+```
+
+```{r}
+song_chars <-
+  song_chars %>%
+  filter(!grepl("Voice Memo",name)) # filter out the "Voice Memo" observations
+
+```
+
+Swift recorded a few song explanation recordings under the "Voice Memo" title which do not classify as real songs.
+
+# Creating the Model
+
+## Checking Distributions
+
+### Checking Normality of the Variables
+```{r}
+song_chars_interest <- 
+  song_chars %>%
+  select(-name,
+         -month,
+         -day) # removing variables that are not of interest
+  
+
+song_chars_interest %>%
+  ggpairs() # using the GGally library to plot correlations and distributions
+```
+
+From the ggpairs() output, I noticed that most of the distributions are not normalized. Additionally, some of the variables namely loudness, energy, and acousticness have high correlations in magnitude potentially leading to issues with multicollinearity.
+
+```{r}
+# using the apply function to ensure that all variables are treated as numeric
+song_chars_interest <- 
+  as.data.frame(
+  apply(
+    song_chars_interest,
+    2,
+    function(x){
+      return(as.numeric(x))
+    }
+  ))
+```
+
+
+### Normalizing the variables using bestNormalize
+```{r}
+set.seed(1234) # set seed to ensure the same outcome for stochastic processes
+```
+
+```{r}
+song_chars_normal <-
+  apply(
+  song_chars_interest, 2,
+  function(x){
+    bestNormalize(x)$x.t # use the best normalize function to normalize all vars
+  }
+)
+
+song_chars_normal <- as.data.frame(song_chars_normal) # put the normalized
+# values in a data frame
+```
+
+```{r}
+song_transforms <- lapply(
+  1:ncol(song_chars_interest),
+  function(i){
+    bestNormalize(
+      song_chars_interest[,i]
+    )
+  }
+) # storing the transforms taken on the variables to enable interpretation
+```
+
+```{r}
+song_chars_normal %>%
+  ggpairs() # looking at the normality and correlation of the normalized vars
+```
+
+After normalizing the variables with bestNormalize, the variable distribibutions are much more normal allowing for better analysis and understanding. year is still a bit not normal, but that is expected as it is not as continuous as the other variables. There are still potential multicollinearity issues with energy, loudness, and accousticness that need to be explored using VIF.
+
+## Setting up the Model
+```{r}
+lm_popularity <- 
+  song_chars_interest %>%
+  lm(
+    formula = popularity ~ . # including all independent variables
+    )
+```
+
+```{r}
+summary(lm_popularity) # extracting the coeffs and values from the regression
+```
+
+energy, valence, and tempo are not significant. The initial $R^2$ of the model is 0.6109 which shows that the variation in the independent variables are explaining about 61% of the variation in popularity.
+
+## Checking Multicollinearity
+```{r}
+VIF(lm_popularity)
+```
+
+As expected, the VIF of acousticness, energy, and loudness are high (around 2-3), but they are not large enough to cause issues with multicollinearity.
+
+## Removing Non-Significant Predictors
+```{r}
+song_chars_interest_sig <-
+  song_chars_interest %>%
+  select(
+    popularity,
+    year,
+    danceability,
+    acousticness,
+    loudness,
+    length_sec
+  ) # new data frame with only significant predictors
+```
+
+## Rerunning the Model with significant predictors
+```{r}
+lm_popularity <- 
+  song_chars_interest_sig %>%
+  lm(
+    formula = popularity ~ . # rerunning with significant predictors
+    )
+```
+
+```{r}
+summary(lm_popularity)
+```
+
+Now, all of the predictors are significant, but the $R^2$ stayed about the same at 0.6061. 
+
+### Rechecking Multicollinearity
+```{r}
+VIF(lm_popularity)
+```
+
+None of the variables have a VIF > 5, so there are no explicit issues with multicollinearity.
+# Analysis of Residuals and Outliers
+```{r}
+hist(residuals(lm_popularity), # base R histogram plot
+     xlab = "Residuals",
+     main = "Histogram of the Residuals of the model",
+     col="dodgerblue3",
+     density=25) # crossed lines in the bars
+```
+
+```{r}
+shapiro.test(residuals(lm_popularity))
+```
+
+```{r}
+plot(lm_popularity, which = 1)
+```
+
+```{r}
+plot(lm_popularity, which = 2)
+```
+
+The histogram of the residuals is somewhat normal, but it is a bit positively skewed. This is supported by the shapiro test which concludes that the residuals are not normal since 0.0017 < 0.05. The Residuals vs Fitted plot also supports this conclusion. While the red line closely lines up with normality, the data is clumped up and there are clear outliers. The Q-Q plot confirms this with there being three main outliers at the top of the popularity spectrum. Thus, her three most popular songs (`Blank Space`, `Shake it Off`, `Lover`) are considered outliers in the model.
+
+## Removing Outliers
+```{r}
+song_chars_interest_outliers <-
+  song_chars_interest[-c(61, 65, 93),] # removing the outliers identified above
+```
+
+# Rerunning the model without outliers
+```{r}
+lm_popularity_outliers <- 
+  song_chars_interest_outliers %>%
+  lm(
+    formula = popularity ~ . # rerunning the model on each var without outliers
+    )
+```
+
+```{r}
+summary(lm_popularity_outliers) 
+```
+
+energy, valence, and tempo are still not significant predictors, but the $R^2$ has increased up to 0.66 by removing outliers.
+
+## Checking Multicollinearity
+```{r}
+VIF(lm_popularity_outliers)
+```
+
+Similar to before, acousticness, energy, and loudness are close to having issues with multicollinearity.
+
+## Removing Non-Significant Predictors
+```{r}
+song_chars_interest_outliers_sig <-
+  song_chars_interest_outliers %>%
+  select(
+    popularity,
+    year,
+    danceability,
+    acousticness,
+    loudness,
+    length_sec
+  ) # removing insignificant variables
+```
+
+## Rerunning Model with significant predictors
+```{r}
+lm_popularity_outliers <- 
+  song_chars_interest_outliers_sig %>%
+  lm(
+    formula = popularity ~ . # rerunning the model with only sig vars
+    )
+```
+
+```{r}
+summary(lm_popularity_outliers)
+```
+
+Now all of the predictors are significant, and the adjusted $R^2$ increased by removing insignificant variables which is good. This means that the removed variables were not adding a significant predicitve value to the model.
+
+## Analysis of Residuals and Outliers
+```{r}
+hist(residuals(lm_popularity_outliers), # base R histogram
+     xlab = "Residuals",
+     main = "Histogram of the Residuals of the model",
+     col="dodgerblue3",
+     density=25) # crossed lines filing the bar
+```
+
+```{r}
+shapiro.test(residuals(lm_popularity_outliers))
+```
+
+```{r}
+plot(lm_popularity_outliers, which = 1)
+```
+
+```{r}
+plot(lm_popularity_outliers, which = 2)
+```
+
+The residuals in the histogram are more normal and show little evidence of skew. Both the residuals vs fitted and Q-Q plot show that the model is mostly normal, and there is little evidence of impactful outliers. Finally, the shapiro test confirms that the residuals are normal as 0.33 > 0.05, so this model satisfies the assumption of residual normality.
+
+# Final Model
+
+There is no need to backtransform the popularity data as it was output in the same units as the original data set.
+
+Thus, this model satisfies the assumptions of linear regression.
+
+ * The outcome variable, popularity, is continuous.
+ * The relationship between popularity and the song characteristics is mostly linear.
+ * The residuals of the model are approximately normal.
+ * The variance of the residuals is not correlated with the independent variables.
+ * There is not significant multicollinearity.
+ * Influential outliers were removed.
+
+
+```{r}
+# Predicted Values
+predicted_values <- predict(lm_popularity_outliers) # final model
+
+# Actual values
+actual_values <- song_chars_interest_outliers_sig$popularity
+```
+
+The final model was used to generate the final predictions for the popularity of Taylor Swift songs based on their characteristics. The actual popularity values were also stored for evaluation purposes.
+
+```{r}
+final_df <- data.frame(
+  actual = actual_values,
+  predicted = predicted_values
+) # compile the actual and predicted values into a dataframe
+```
+
+
+## Evaluate Model
+
+### Compute RMSE and Correlation
+```{r}
+sqrt(mean(residuals(lm_popularity_outliers)^2))
+```
+
+The RMSE is approximately 4.93 which means that the model incorrectly predicts song popularity by about 5 points on average. This shows that the model is not incredibly accurate as the range of popularities for Swift's songs go from 43 - 82.
+
+### Computing Correlation
+```{r}
+cor(predicted_values, actual_values)^2
+```
+
+The final correlation coefficient or $R^2$ is approximately 0.654 which is slightly above average. This aligns with the RMSE values as the model can moderately accurately predict song popularity.
+
+## Plot Fitted vs. Actual Data
+```{r}
+final_df %>%
+ggplot(
+  aes(
+    x = actual,
+    y = predicted
+    )
+  ) +
+  geom_point(
+    color = "coral",
+    alpha = 0.8,
+    shape = 1 # empty hole points
+  ) + # scatterplot
+  geom_smooth(method = "lm",
+              color = "dodgerblue3") +
+  labs(
+    x = "Actual Values",
+    y = "Predicted Values",
+    title = "Actual vs. Predicted Values"
+  ) + # better lables
+  scale_x_continuous(
+    limits = c(42.5, 78),
+    breaks = seq(40, 80, 5)
+  ) + # better x scale
+  scale_y_continuous(
+    limits = c(42.5, 78),
+    breaks = seq(40, 75, 5)
+  ) + # better y scale
+  theme(
+    plot.title = element_text(size = 15, hjust = 0.5)
+  ) # center and increase title size
+```
+
+This plot reflects the moderate accuracy of the linear regression model. The blue linear regression line shows the overall trend of the song popularities, but it does not do an incredible job of having extreme accuracy.
+
+# Discussion
+
+Using Spotify's data on Taylor Swift songs, I was able to create a moderately accurate model using song characteristics to predict the popularity of her songs. The model had a final RMSE of 4.93 and an $R^2$ of 0.654. This means that on avearge the model was off by about 4.93 points of popularity (out of 100), but the variation in the independent variables explained about 65% of the variation in popularity. Since the coefficients of the variables are significant, I can reject the null hypothesis and concluded that at least one of the release year, length (in seconds), danceability, acousticness, energy, loudness, valence, or tempo of the song are related to popularity. While this model did satisfy all of the assumptions of linear regression, it is important to understand the the popularity of songs is very complicated and needs to be analyzed by more predictors and data points. Two songs can have the exact same characteristics but have very different popularity results. If songs could be designed to be as popular as possible, major labels and artists would patent and mass produce mega-popular songs to be consumed by the masses. However, opinion is subjective, and I appreciate that songs of any genre or background can be popular and enjoyable to listen to. With that being said, the model predicted the following result for each characteristic of Taylor Swift song between 2006 and 2021:
+
+ * year: A one standard deviation increase in year corresponds with a 1.22 point increase in          popularity.
+ * danceability: A one standard deviation increase in danceability corresponds with a 1.03 point      increase in popularity.
+ * acousticness: A one standard deviation increase in acousticness corresponds with a 1.02 point      decrease in popularity.
+ * loudness: A one standard deviation increase in loudness corresponds with an 8.2 point decrease     in popularity.
+ * length_sec: A one standard deviation increase in the length of the song in seconds corresponds     with a 3.28 point decrease in popularity.
+ 
+Thus, according to my model, the most popular Taylor Swift song would be one with high levels of danceability, limited acoustic instruments, low loudness levels, a short song, and one released as close to present day as possible. Many of these things contradict each other or with Swift's main identity. Swift is most popularly known for using an acoustic guitar, having long songs, and she has released songs over multiple decades. While this analysis can show what has worked in the past, if I were Swift's agent or producer, I would focus on her releasing songs she enjoys writing and performing and try to keep genuine to her core audience. It has brought her much success so far, and I do not see why it would not continue.
